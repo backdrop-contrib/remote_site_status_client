@@ -1,0 +1,6 @@
+name = Remote Site Status Client
+description = Reports this site's status (Backdrop, PHP and database versions, last cron run, and installed project versions [modules, themes, layouts]) to a Remote Site Status server.
+package = Site Management
+type = module
+backdrop = 1.x
+configure = admin/config/remote-site-status-client

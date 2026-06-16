@@ -1,0 +1,299 @@
+<?php
+
+/**
+ * @file
+ * Remote Site Status Client module.
+ *
+ * On cron (throttled to a configurable interval, daily by default), gathers
+ * this site's technical status — core version, PHP, database, last cron run,
+ * and installed project versions — and posts it to a configured Multisite
+ * Status server. Fire-and-forget: a failed report logs to watchdog and retries
+ * the next time cron runs. Nothing in any request path waits on this module.
+ */
+
+/**
+ * Implements hook_config_info().
+ */
+function remote_site_status_client_config_info() {
+  $config['remote_site_status_client.settings'] = array(
+    'label' => 'Remote Site Status Client settings',
+    'group' => 'system',
+  );
+
+  return $config;
+}
+
+/**
+ * Implements hook_menu().
+ */
+function remote_site_status_client_menu() {
+  $items['admin/config/remote-site-status-client'] = array(
+    'title' => 'Remote Site Status Client',
+    'description' => 'Configure the server endpoint and API key for status reporting.',
+    'page callback' => 'backdrop_get_form',
+    'page arguments' => array('remote_site_status_client_settings_form'),
+    'access arguments' => array('administer site configuration'),
+    'file' => 'remote_site_status_client.admin.inc',
+    'type' => MENU_NORMAL_ITEM,
+  );
+
+  return $items;
+}
+
+/**
+ * Implements hook_cron().
+ *
+ * Fires a status report to the configured server when the reporting interval
+ * has elapsed. A failed attempt is logged to watchdog and retried on the next
+ * cron run — nothing is queued or retried within the same request. The
+ * interval throttle is checked against state so a high-frequency cron does not
+ * cause excessive HTTP traffic to the reporting server.
+ */
+function remote_site_status_client_cron() {
+  $config = config('remote_site_status_client.settings');
+  $server_url = trim((string) $config->get('server_url'));
+  $api_key = trim((string) $config->get('api_key'));
+
+  if (empty($server_url) || empty($api_key)) {
+    return;
+  }
+
+  $interval = (int) $config->get('report_interval') ?: 86400;
+  $last_report = (int) state_get('remote_site_status_client_last_report', 0);
+
+  if ((REQUEST_TIME - $last_report) < $interval) {
+    return;
+  }
+
+  $report = remote_site_status_client_gather_report();
+  remote_site_status_client_send_report($report);
+}
+
+/**
+ * Assemble the full status report for this site.
+ *
+ * Gathers core version, PHP version, database driver and version, last cron
+ * run timestamp, and the list of installed contrib projects. Reports only
+ * facts about this site — no "latest" comparisons, no Update Manager
+ * dependency. The server owns "latest".
+ *
+ * @return array
+ *   The report payload, ready for JSON encoding and POSTing to the server.
+ */
+function remote_site_status_client_gather_report() {
+  $db_connection = Database::getConnection();
+  $driver = $db_connection->driver();
+
+  try {
+    $version_string = (string) db_query('SELECT VERSION()')->fetchField();
+  }
+  catch (Exception $_e) {
+    $version_string = '';
+  }
+
+  // Extract the clean numeric version (strip build/distribution metadata).
+  $db_version = '';
+  if ($version_string && preg_match('/^(\d+\.\d+[\.\d]*)/', $version_string, $matches)) {
+    $db_version = $matches[1];
+  }
+
+  // MariaDB embeds its name in the VERSION() string; reclassify the driver
+  // so the server can distinguish it from upstream MySQL.
+  if ($driver === 'mysql' && stripos($version_string, 'mariadb') !== FALSE) {
+    $driver = 'mariadb';
+  }
+
+  return array(
+    'backdrop_version' => BACKDROP_VERSION,
+    'php_version' => phpversion(),
+    'db_driver' => $driver,
+    'db_version' => $db_version,
+    'cron_last' => (int) state_get('cron_last', 0),
+    'projects' => remote_site_status_client_gather_projects(),
+  );
+}
+
+/**
+ * Build the list of installed contrib projects for inclusion in the report.
+ *
+ * Walks enabled modules and themes, and all installed layout templates,
+ * filtering out anything from the Backdrop core directory or flagged with the
+ * 'backdrop' project key. Custom projects (no project key in .info) are
+ * included inventory-only, keyed by their machine name, so the server can
+ * answer "which sites run this theme" without needing an upstream feed.
+ *
+ * @return array
+ *   Indexed array of project arrays, each with keys: name, type (module /
+ *   theme / layout), project, installed_version (NULL when absent).
+ */
+function remote_site_status_client_gather_projects() {
+  // Keyed by "type:project" during collection so submodules that share a
+  // project key are deduplicated. When the main module (name === project)
+  // is encountered it replaces any earlier submodule entry; otherwise the
+  // first-seen entry wins.
+  $seen = array();
+
+  // --- Modules ---
+  $module_data = system_rebuild_module_data();
+  foreach ($module_data as $name => $module) {
+    // Enabled modules only.
+    if (empty($module->status)) {
+      continue;
+    }
+    // Skip anything physically in the core/ directory.
+    if (strpos($module->uri, 'core/') === 0) {
+      continue;
+    }
+    // Skip core Backdrop projects.
+    if (!empty($module->info['project']) && $module->info['project'] === 'backdrop') {
+      continue;
+    }
+    $project_key = !empty($module->info['project']) ? $module->info['project'] : $name;
+    $slot = 'module:' . $project_key;
+    if (!isset($seen[$slot]) || $name === $project_key) {
+      $seen[$slot] = array(
+        'name' => $project_key,
+        'type' => 'module',
+        'project' => $project_key,
+        'installed_version' => !empty($module->info['version']) ? $module->info['version'] : NULL,
+      );
+    }
+  }
+
+  // --- Themes ---
+  // In Backdrop 1.x, active themes are determined by config, not the system
+  // table. system_rebuild_theme_data() gives full info (uri, version, project)
+  // but has no reliable status; list_themes() suffers the same. Instead we
+  // read the active theme names directly from config and look up their info.
+  $all_theme_data = system_rebuild_theme_data();
+  $active_theme_names = array_unique(array_filter(array(
+    config_get('system.core', 'theme_default'),
+    config_get('system.core', 'admin_theme'),
+  )));
+
+  foreach ($active_theme_names as $name) {
+    if (!isset($all_theme_data[$name])) {
+      continue;
+    }
+    $theme = $all_theme_data[$name];
+    // Core themes are included deliberately — knowing which theme a site runs
+    // is useful fleet information even when it is a bundled Backdrop theme.
+    // Core themes carry project = 'backdrop' in their .info, which is not a
+    // useful project key; fall back to the machine name for those.
+    $project_key = (!empty($theme->info['project']) && $theme->info['project'] !== 'backdrop')
+      ? $theme->info['project']
+      : $name;
+    $slot = 'theme:' . $project_key;
+    if (!isset($seen[$slot]) || $name === $project_key) {
+      $seen[$slot] = array(
+        'name' => $project_key,
+        'type' => 'theme',
+        'project' => $project_key,
+        'installed_version' => !empty($theme->info['version']) ? $theme->info['version'] : NULL,
+      );
+    }
+  }
+
+  // --- Layouts ---
+  // layout_get_layout_template_info() returns raw info arrays (not objects).
+  // Mirrors the approach in core's _update_build_layout_data().
+  $layout_data = layout_get_layout_template_info();
+  foreach ($layout_data as $layout) {
+    $name = $layout['name'];
+    $path = isset($layout['path']) ? $layout['path'] : '';
+
+    if (strpos($path, 'core/') === 0) {
+      continue;
+    }
+    if (!empty($layout['project']) && $layout['project'] === 'backdrop') {
+      continue;
+    }
+    $project_key = !empty($layout['project']) ? $layout['project'] : $name;
+    $slot = 'layout:' . $project_key;
+    if (!isset($seen[$slot]) || $name === $project_key) {
+      $seen[$slot] = array(
+        'name' => $project_key,
+        'type' => 'layout',
+        'project' => $project_key,
+        'installed_version' => !empty($layout['version']) ? $layout['version'] : NULL,
+      );
+    }
+  }
+
+  return array_values($seen);
+}
+
+/**
+ * POST a status report to the configured server.
+ *
+ * Fire-and-forget: logs failures to watchdog and returns FALSE so the caller
+ * knows whether to update the throttle timestamp. Never throws or blocks —
+ * a reporting failure must not affect any user-facing operation.
+ *
+ * The response body is intentionally ignored beyond confirming HTTP 200. The
+ * server's response is an inert acknowledgement only; acting on its content
+ * would be a supply-chain risk.
+ *
+ * @param array $report
+ *   The assembled report payload from remote_site_status_client_gather_report().
+ *
+ * @return bool
+ *   TRUE if the server returned HTTP 200, FALSE otherwise.
+ */
+function remote_site_status_client_send_report(array $report) {
+  $config = config('remote_site_status_client.settings');
+  $server_url = rtrim(trim((string) $config->get('server_url')), '/');
+  $api_key = trim((string) $config->get('api_key'));
+
+  $endpoint = $server_url . '/api/v1/remote-site-status/report';
+
+  $options = array(
+    'method' => 'POST',
+    'data' => json_encode($report),
+    'headers' => array(
+      'Content-Type' => 'application/json',
+      'Authorization' => 'Bearer ' . $api_key,
+    ),
+    'timeout' => 15,
+  );
+
+  $response = backdrop_http_request($endpoint, $options);
+  $code = isset($response->code) ? (int) $response->code : 0;
+
+  if (isset($response->error) || $code !== 200) {
+    $error = isset($response->error) ? $response->error : 'HTTP ' . $code;
+    watchdog('remote_site_status_client',
+      'Failed to send status report to @url: @error',
+      array('@url' => $endpoint, '@error' => $error),
+      WATCHDOG_WARNING
+    );
+    return FALSE;
+  }
+
+  // Record the successful send time so the throttle resets from now.
+  state_set('remote_site_status_client_last_report', REQUEST_TIME);
+  return TRUE;
+}
+
+/**
+ * Extract a JSON object string from a raw HTTP response body.
+ *
+ * backdrop_http_request() does not decode chunked transfer encoding, so the
+ * raw body may contain chunk-size markers (e.g. "1a {...} 0"). This function
+ * extracts just the JSON object between the outermost braces, matching the
+ * same approach used in webform_guard_client.
+ *
+ * @param string $body
+ *   The raw HTTP response body.
+ *
+ * @return string
+ *   The extracted JSON string, or the original body if no object is found.
+ */
+function remote_site_status_client_extract_json($body) {
+  $start = strpos($body, '{');
+  $end = strrpos($body, '}');
+  if ($start !== FALSE && $end !== FALSE && $end > $start) {
+    return substr($body, $start, $end - $start + 1);
+  }
+  return $body;
+}

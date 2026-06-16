@@ -1,10 +1,10 @@
-# Multisite Status Client (Acuity)
+# Remote Site Status Client
 
 ==================================================
 IGNORED PATHS (do not read, analyse, or scan)
 ==================================================
 
-- modules/acuity_multisite_status_client/docs/**
+- modules/remote_site_status_client/docs/**
 
 These are third-party libraries and generated documentation.
 Do not read, scan, or suggest changes to files under these paths.
@@ -17,14 +17,14 @@ RELATED MODULES & REFERENCES
 
 This is the CLIENT half of a client/server pair. Read these for context:
 
-- **Server half** — `/modules/acuity_multisite_status_server` (see its CLAUDE.md).
+- **Server half** — `/modules/remote_site_status_server` (see its CLAUDE.md).
   The server defines the request/response schema, the key/auth model, and what the
   report payload must contain. The client must conform to it. Keep the two in step.
 - **Pattern reference** — `/modules/webform_guard_client` (see its CLAUDE.md).
   A proven, shipped client module. **Reuse its patterns** for HTTP transport, Bearer
   auth, settings form, and the test-connection flow — as COPIED-AND-ADAPTED code,
   NOT a shared library.
-- **Design of record** — `acuity_multisite_status_build_brief.md` (full pair spec).
+- **Design of record** — `remote_site_status_build_brief.md` (full pair spec).
 
 Other CLAUDE.md files exist in sibling module folders; treat each as authoritative
 for its own module.
@@ -34,7 +34,7 @@ for its own module.
 ROLE
 ==================================================
 
-You are a Senior Co-Developer and Security Advisor for the Acuity Multisite Status
+You are a Senior Co-Developer and Security Advisor for the Remote Site Status
 client Backdrop CMS module.
 
 Your responsibilities:
@@ -68,8 +68,8 @@ PHP Standards:
 
 Config:
 - Use .info files with: backdrop = 1.x (NOT core = 7.x)
-- Settings live in: acuity_multisite_status_client.settings
-  (config/acuity_multisite_status_client.settings.json)
+- Settings live in: remote_site_status_client.settings
+  (config/remote_site_status_client.settings.json)
 
 Routing:
 - Use backdrop_deliver_page() where appropriate
@@ -84,11 +84,9 @@ Scope Control:
 PROJECT OVERVIEW
 ==================================================
 
-`acuity_multisite_status_client` is the agent installed on each managed Backdrop
+`remote_site_status_client` is the agent installed on each managed Backdrop
 site. On cron it gathers the site's own technical status and reports it to a central
-`acuity_multisite_status_server`, so the operator can monitor many sites in one
-place. Standalone Acuity-family utility (include the standard Acuity disclaimer in
-the README).
+`remote_site_status_server`, so the operator can monitor many sites in one place.
 
 ## Key responsibilities
 - On cron (throttled, daily default), gather this site's status:
@@ -99,13 +97,13 @@ the README).
   - Last cron run (`state_get('cron_last')`)
   - Installed contrib projects — modules, themes AND layouts — each with `name`,
     `type`, the `.info` `project` key, and `installed_version`. Exclude core.
-- POST the report to the server's `/api/v1/report` with Bearer-token (site key)
+- POST the report to the server's `/api/v1/remote-site-status/report` with Bearer-token (site key)
   auth. Fire-and-forget: a failed report logs to watchdog and retries next run;
   nothing in a request path waits on it.
 - Report INSTALLED FACTS ONLY — no "latest", no comparison, no dates. The server
   owns "latest". The client does NOT depend on Update Manager.
 - Settings: server URL, API key, report interval (daily default). Provide a
-  test-connection button hitting `/api/v1/status`.
+  test-connection button hitting `/api/v1/remote-site-status/status`.
 
 ## Configuration
 - Server endpoint URL
@@ -117,27 +115,44 @@ the README).
 COMPLETED WORK
 ==================================================
 
-- None yet. Pre-development.
+- remote_site_status_client.info — module metadata, package Site Management, backdrop 1.x, configure path
+- remote_site_status_client.install — hook_uninstall() only; no schema (state + CMI, no DB tables)
+- config/remote_site_status_client.settings.json — defaults: server_url, api_key, report_interval 86400, last_test_time null, last_test_status null
+- remote_site_status_client.module:
+  - hook_config_info() — registers settings CMI
+  - hook_menu() — single route admin/config/remote-site-status-client (MENU_NORMAL_ITEM)
+  - hook_cron() — throttle check via state, gather, send; no action on response
+  - remote_site_status_client_gather_report() — BACKDROP_VERSION, phpversion(), db driver + version (MariaDB detection via stripos), state_get('cron_last'), projects list
+  - remote_site_status_client_gather_projects() — enabled modules + layouts filtered to non-core contrib; themes use config_get('system.core', 'theme_default/admin_theme') to get active theme names, then system_rebuild_theme_data() for full info. Core themes included (theme choice is meaningful fleet info). Core themes carry project='backdrop' in .info so fall back to machine name to avoid collision. Deduplicated by project key (one row per project, not per submodule) — main module (name === project) preferred over submodule entries
+  - remote_site_status_client_send_report() — POSTs to /api/v1/remote-site-status/report, Bearer auth, 15s timeout, never acts on response body, watchdog on failure, state_set on success
+  - remote_site_status_client_extract_json() — strips chunked transfer encoding from backdrop_http_request() bodies
+- remote_site_status_client.admin.inc:
+  - remote_site_status_client_settings_form() — server_url, api_key (required), report_interval select (1h/12h/24h/7d), last test status display, HTTPS advisory warning, three action buttons
+  - remote_site_status_client_settings_form_validate() — valid_url() check on server_url
+  - remote_site_status_client_settings_form_submit() — saves server_url (trimmed/rtrimmed), api_key, report_interval to config
+  - remote_site_status_client_test_connection_submit() — GETs /api/v1/remote-site-status/status, stores last_test_time + last_test_status, rebuilds form
+  - remote_site_status_client_send_now_submit() — bypasses throttle, gathers + sends immediately, rebuilds form
 
 
 ==================================================
 CURRENT STATE
 ==================================================
 
-Pre-development. Design finalised in acuity_multisite_status_build_brief.md.
-No code written, no repo created yet. Server half tracked separately in
-/modules/acuity_multisite_status_server.
+Initial implementation complete — all five files written, not yet tested on dev site.
+Settings live in remote_site_status_client.settings (CMI). No DB schema.
+Last-report throttle in state. Admin UI at admin/config/remote-site-status-client.
+Next step: enable on dev site alongside the server module and run update.php to confirm
+no install errors, then test the "Test connection" and "Send report now" buttons.
 
 
 ==================================================
-KEY FILES (planned)
+KEY FILES
 ==================================================
 
-- acuity_multisite_status_client.module — hook_cron report trigger, status
-  gathering, relay/transport, Bearer auth
-- acuity_multisite_status_client.admin.inc — settings form (server URL, key,
-  interval), test-connection handler
-- (last-reported timestamp via state; no schema unless a table proves necessary)
+- remote_site_status_client.module — hook_cron, gather_report(), gather_projects(), send_report(), extract_json()
+- remote_site_status_client.admin.inc — settings form, validate, save, test-connection, send-now handlers
+- remote_site_status_client.install — hook_uninstall() only
+- config/remote_site_status_client.settings.json — CMI defaults
 
 
 ==================================================
@@ -156,10 +171,11 @@ Before closing each session, always:
 PLANNED / NEXT
 ==================================================
 
-See the build order in acuity_multisite_status_build_brief.md. The client is built
-AFTER the server's report schema is settled (build-order steps 5–6), so the payload
-conforms to what the server ingests. Confirm structure and ask questions before
-writing code. Discuss with user before starting.
+1. Test install on dev site — enable client module, verify no PHP errors, confirm
+   settings form loads, test-connection passes against local server module.
+2. Wire the server-side /report endpoint so it accepts and stores the client payload.
+3. README.md for the client module.
+4. Consider: last_report display on settings form (how long until next scheduled report).
 
 
 ==================================================
@@ -179,7 +195,7 @@ CONSTRAINTS (PERMANENT)
 - The API key is the site's identity to the server; send it as Bearer auth and do
   NOT put a site identifier in the payload (the server ignores it anyway).
 - Conform to the server's request/response schema — see
-  /modules/acuity_multisite_status_server.
+  /modules/remote_site_status_server.
 
 
 ==================================================

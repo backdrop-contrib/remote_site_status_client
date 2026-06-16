@@ -1,0 +1,8 @@
+{
+  "server_url": "",
+  "api_key": "",
+  "report_interval": 86400,
+  "last_test_time": null,
+  "last_test_status": null,
+  "_config_name": "remote_site_status_client.settings"
+}

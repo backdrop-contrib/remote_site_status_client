@@ -1,0 +1,20 @@
+<?php
+
+/**
+ * @file
+ * Install and uninstall callbacks for Remote Site Status Client.
+ *
+ * No database tables are required: the last-report timestamp lives in state
+ * and all configuration lives in CMI. Uninstall removes both.
+ */
+
+/**
+ * Implements hook_uninstall().
+ *
+ * Removes module configuration and clears the last-report state so a
+ * reinstall starts clean without a stale throttle timestamp.
+ */
+function remote_site_status_client_uninstall() {
+  config('remote_site_status_client.settings')->delete();
+  state_del('remote_site_status_client_last_report');
+}
