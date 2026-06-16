@@ -6,8 +6,8 @@
  *
  * On cron (throttled to a configurable interval, daily by default), gathers
  * this site's technical status — core version, PHP, database, last cron run,
- * and installed project versions — and posts it to a configured Multisite
- * Status server. Fire-and-forget: a failed report logs to watchdog and retries
+ * and installed project versions — and posts it to a configured Remote
+ * Site Status server. Fire-and-forget: a failed report logs to watchdog and retries
  * the next time cron runs. Nothing in any request path waits on this module.
  */
 
@@ -93,7 +93,8 @@ function remote_site_status_client_gather_report() {
 
   // Extract the clean numeric version (strip build/distribution metadata).
   $db_version = '';
-  if ($version_string && preg_match('/^(\d+\.\d+[\.\d]*)/', $version_string, $matches)) {
+  if ($version_string
+      && preg_match('/^(\d+\.\d+[\.\d]*)/', $version_string, $matches)) {
     $db_version = $matches[1];
   }
 
@@ -145,17 +146,20 @@ function remote_site_status_client_gather_projects() {
       continue;
     }
     // Skip core Backdrop projects.
-    if (!empty($module->info['project']) && $module->info['project'] === 'backdrop') {
+    if (!empty($module->info['project'])
+        && $module->info['project'] === 'backdrop') {
       continue;
     }
-    $project_key = !empty($module->info['project']) ? $module->info['project'] : $name;
+    $project_key = !empty($module->info['project'])
+      ? $module->info['project'] : $name;
     $slot = 'module:' . $project_key;
     if (!isset($seen[$slot]) || $name === $project_key) {
       $seen[$slot] = array(
         'name' => $project_key,
         'type' => 'module',
         'project' => $project_key,
-        'installed_version' => !empty($module->info['version']) ? $module->info['version'] : NULL,
+        'installed_version' => !empty($module->info['version'])
+          ? $module->info['version'] : NULL,
       );
     }
   }
@@ -180,7 +184,8 @@ function remote_site_status_client_gather_projects() {
     // is useful fleet information even when it is a bundled Backdrop theme.
     // Core themes carry project = 'backdrop' in their .info, which is not a
     // useful project key; fall back to the machine name for those.
-    $project_key = (!empty($theme->info['project']) && $theme->info['project'] !== 'backdrop')
+    $project_key = (!empty($theme->info['project'])
+        && $theme->info['project'] !== 'backdrop')
       ? $theme->info['project']
       : $name;
     $slot = 'theme:' . $project_key;
@@ -189,7 +194,8 @@ function remote_site_status_client_gather_projects() {
         'name' => $project_key,
         'type' => 'theme',
         'project' => $project_key,
-        'installed_version' => !empty($theme->info['version']) ? $theme->info['version'] : NULL,
+        'installed_version' => !empty($theme->info['version'])
+          ? $theme->info['version'] : NULL,
       );
     }
   }
@@ -215,7 +221,8 @@ function remote_site_status_client_gather_projects() {
         'name' => $project_key,
         'type' => 'layout',
         'project' => $project_key,
-        'installed_version' => !empty($layout['version']) ? $layout['version'] : NULL,
+        'installed_version' => !empty($layout['version'])
+          ? $layout['version'] : NULL,
       );
     }
   }

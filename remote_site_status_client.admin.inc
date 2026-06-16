@@ -101,7 +101,8 @@ function remote_site_status_client_settings_form($form, &$form_state) {
   $form['connection']['test_status'] = array(
     '#type' => 'item',
     '#title' => t('Connection status'),
-    '#markup' => '<span class="rss-test-status rss-test-status--' . $test_class . '">' . $test_markup . '</span>',
+    '#markup' => '<span class="rss-test-status rss-test-status--'
+      . $test_class . '">' . $test_markup . '</span>',
   );
 
   $form['actions'] = array('#type' => 'actions');
@@ -159,9 +160,11 @@ function remote_site_status_client_settings_form_validate($form, &$form_state) {
  */
 function remote_site_status_client_settings_form_submit($form, &$form_state) {
   $config = config('remote_site_status_client.settings');
-  $config->set('server_url', rtrim(trim($form_state['values']['server_url']), '/'));
+  $config->set('server_url',
+    rtrim(trim($form_state['values']['server_url']), '/'));
   $config->set('api_key', trim($form_state['values']['api_key']));
-  $config->set('report_interval', (int) $form_state['values']['report_interval']);
+  $config->set('report_interval',
+    (int) $form_state['values']['report_interval']);
   $config->save();
   backdrop_set_message(t('Settings saved.'));
 }
@@ -206,10 +209,12 @@ function remote_site_status_client_test_connection_submit($form, &$form_state) {
   if (!isset($response->error) && $code === 200) {
     $body = remote_site_status_client_extract_json($response->data);
     $data = json_decode($body, TRUE);
-    $status = (is_array($data) && isset($data['status'])) ? $data['status'] : 'ok';
+    $status = (is_array($data) && isset($data['status']))
+      ? $data['status'] : 'ok';
     $config->set('last_test_status', $status);
     $config->save();
-    backdrop_set_message(t('Connection test passed. Server responded with status: @status.', array('@status' => $status)));
+    backdrop_set_message(t('Connection test passed. Server responded with status: @status.',
+      array('@status' => $status)));
   }
   else {
     $error = isset($response->error) ? $response->error : 'HTTP ' . $code;
