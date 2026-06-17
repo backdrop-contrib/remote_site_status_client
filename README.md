@@ -21,7 +21,7 @@ As a beta release, the core cron reporting, project inventory gathering, and adm
 
 - Backdrop CMS 1.x
 - PHP 8.0+ (While the code may technically function with PHP 7.4 at this time, we strictly require PHP 8.0+ and will not address issues related to older PHP versions.)
-- A running installation of the companion [Remote Site Status Server](../remote_site_status_server) module
+- A running installation of the companion [Remote Site Status Server](https://github.com/backdrop-contrib/remote_site_status_server) module
 
 ## Installation
 
@@ -40,7 +40,7 @@ Enable the module on each site you wish to monitor.
 
 ## Issues
 
-Bugs and feature requests should be reported in the Issue Queue: https://github.com/albanycomputers/remote_site_status/issues
+Bugs and feature requests should be reported in the Issue Queue: https://github.com/backdrop-contrib/remote_site_status_server/issues
 
 ## Current Maintainer(s)
 - Steve Moorhouse (albanycomputers) (https://github.com/albanycomputers)
