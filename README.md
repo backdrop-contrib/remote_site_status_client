@@ -40,7 +40,7 @@ Enable the module on each site you wish to monitor.
 
 ## Issues
 
-Bugs and feature requests should be reported in the Issue Queue: https://github.com/backdrop-contrib/remote_site_status_server/issues
+Bugs and feature requests should be reported in the Issue Queue: https://github.com/backdrop-contrib/remote_site_status_client/issues
 
 ## Current Maintainer(s)
 - Steve Moorhouse (albanycomputers) (https://github.com/albanycomputers)
